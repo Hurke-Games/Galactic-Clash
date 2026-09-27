@@ -992,9 +992,11 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         return;
       }
 
-      if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
+      const targetW = canvas.parentElement ? canvas.parentElement.clientWidth : window.innerWidth;
+      const targetH = canvas.parentElement ? canvas.parentElement.clientHeight : window.innerHeight;
+      if (canvas.width !== targetW || canvas.height !== targetH) {
+        canvas.width = targetW || window.innerWidth;
+        canvas.height = targetH || window.innerHeight;
       }
 
       if (!isPaused) {
