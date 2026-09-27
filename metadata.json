@@ -1,0 +1,8 @@
+{
+  "name": "Galactic Clash",
+  "description": "Real-time top-down tactical space conquest game with randomized star systems, planetary infrastructure, orbital defenses, colony fleets, and AI factions.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
