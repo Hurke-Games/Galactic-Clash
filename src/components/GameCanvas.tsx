@@ -126,6 +126,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   // Nearby planet that player can land on (for HUD prompt)
   const playerLandablePlanetRef = useRef<Planet | null>(null);
 
+  // Mouse position on canvas for mouse-based ship rotation
+  const mousePosRef = useRef<{ x: number; y: number; active: boolean }>({ x: 0, y: 0, active: false });
+
   // Flattened planets for quick lookup
   const getAllPlanets = useCallback((): Planet[] => {
     const list: Planet[] = [];
@@ -238,8 +241,15 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         }
         landKeyWasPressedRef.current = true;
       }
-      if (e.key === 'Control' || e.code === 'ControlLeft' || e.code === 'ControlRight' || e.ctrlKey) {
+
+      // Boost & Thrust: Left & Right Shift by default, plus Ctrl as alternate
+      const isShift = e.key === 'Shift' || e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.shiftKey;
+      const isCtrl = e.key === 'Control' || e.code === 'ControlLeft' || e.code === 'ControlRight' || e.ctrlKey;
+      const isBoostBinding = bindings.boost && matchesBinding(e, bindings.boost);
+
+      if (isShift || isCtrl || isBoostBinding) {
         keysRef.current.boost = true;
+        keysRef.current.thrust = true;
       }
     };
 
@@ -264,8 +274,17 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         keysRef.current.land = false;
         landKeyWasPressedRef.current = false;
       }
-      if (e.key === 'Control' || e.code === 'ControlLeft' || e.code === 'ControlRight') {
+
+      const isShift = e.key === 'Shift' || e.code === 'ShiftLeft' || e.code === 'ShiftRight';
+      const isCtrl = e.key === 'Control' || e.code === 'ControlLeft' || e.code === 'ControlRight';
+      const isBoostBinding = bindings.boost && matchesBinding(e, bindings.boost);
+
+      if (isShift || isCtrl || isBoostBinding) {
         keysRef.current.boost = false;
+        // If not holding other thrust keys, disable thrust
+        if (!matchesBinding(e, bindings.thrust)) {
+          keysRef.current.thrust = false;
+        }
       }
     };
 
@@ -279,6 +298,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         land: false,
         boost: false,
       };
+      mousePosRef.current.active = false;
     };
 
     const handleWheel = (e: WheelEvent) => {
@@ -287,20 +307,58 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       cameraRef.current.targetZoom = Math.max(0.35, Math.min(1.4, cameraRef.current.targetZoom + zoomDelta));
     };
 
+    // Left Mouse Button Shooting
+    const handleMouseDown = (e: MouseEvent) => {
+      if (e.button === 0) {
+        keysRef.current.shoot = true;
+      }
+    };
+
+    const handleMouseUp = (e: MouseEvent) => {
+      if (e.button === 0) {
+        keysRef.current.shoot = false;
+        shootKeyWasPressedRef.current = false;
+      }
+    };
+
+    // Mouse Tracking for Ship Rotation
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!canvasRef.current) return;
+      const rect = canvasRef.current.getBoundingClientRect();
+      mousePosRef.current = {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top,
+        active: true,
+      };
+    };
+
+    const handleMouseLeave = () => {
+      mousePosRef.current.active = false;
+    };
+
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
     window.addEventListener('blur', handleBlur);
+    window.addEventListener('mouseup', handleMouseUp);
+
     const canvas = canvasRef.current;
     if (canvas) {
       canvas.addEventListener('wheel', handleWheel, { passive: false });
+      canvas.addEventListener('mousedown', handleMouseDown);
+      canvas.addEventListener('mousemove', handleMouseMove);
+      canvas.addEventListener('mouseleave', handleMouseLeave);
     }
 
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('blur', handleBlur);
+      window.removeEventListener('mouseup', handleMouseUp);
       if (canvas) {
         canvas.removeEventListener('wheel', handleWheel);
+        canvas.removeEventListener('mousedown', handleMouseDown);
+        canvas.removeEventListener('mousemove', handleMouseMove);
+        canvas.removeEventListener('mouseleave', handleMouseLeave);
       }
     };
   }, []);
@@ -1750,14 +1808,37 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
           // D. OPEN SPACE FLIGHT (flightState === 'flying')
           if (faction.isHuman) {
-            // Steering
-            const turnRate = 4.0 * dt;
-            if (keysRef.current.left) ship.angle -= turnRate;
-            if (keysRef.current.right) ship.angle += turnRate;
+            // Steering: Mouse-guided aiming if enabled, otherwise keyboard turning
+            if (settings.rotateWithMouse && mousePosRef.current.active) {
+              const cx = canvas.width / 2;
+              const cy = canvas.height / 2;
+              const worldMouseX = cameraRef.current.x + (mousePosRef.current.x - cx) / cameraRef.current.zoom;
+              const worldMouseY = cameraRef.current.y + (mousePosRef.current.y - cy) / cameraRef.current.zoom;
+              const targetAngle = Math.atan2(worldMouseY - ship.y, worldMouseX - ship.x);
 
-            // Hyper-Thrust Boost with CTRL (Burns in 3s, Regens in 12s, 2x speed)
-            const isHoldingCtrl = keysRef.current.boost;
-            const canBoost = isHoldingCtrl && ship.boost > 0;
+              const angleDiff = shortestAngleDiff(ship.angle, targetAngle);
+              const maxTurn = 7.5 * dt; // Responsive and smooth mouse rotation
+              if (Math.abs(angleDiff) <= maxTurn) {
+                ship.angle = targetAngle;
+              } else {
+                ship.angle += Math.sign(angleDiff) * maxTurn;
+              }
+            } else {
+              const turnRate = 4.0 * dt;
+              if (keysRef.current.left) ship.angle -= turnRate;
+              if (keysRef.current.right) ship.angle += turnRate;
+            }
+
+            // Keyboard overrides / fine-tuning even when mouse rotation is active
+            if (settings.rotateWithMouse && (keysRef.current.left || keysRef.current.right)) {
+              const turnRate = 4.0 * dt;
+              if (keysRef.current.left) ship.angle -= turnRate;
+              if (keysRef.current.right) ship.angle += turnRate;
+            }
+
+            // Hyper-Thrust Boost with SHIFT (Burns in 3s, Regens in 12s, 2x speed)
+            const isHoldingBoost = keysRef.current.boost;
+            const canBoost = isHoldingBoost && ship.boost > 0;
             ship.boosting = canBoost;
 
             if (ship.boosting) {
@@ -1772,7 +1853,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
               onPlayerBoostChangeRef.current(ship.boost, ship.maxBoost);
             }
 
-            // Forward thrust with W / Up Arrow or CTRL Boost (move twice as fast by holding CTRL)
+            // Forward thrust with W / Up Arrow, Left/Right Shift, or Boost
             const baseThrust = 290;
             const isMovingForward = keysRef.current.thrust || ship.boosting;
             ship.thrusting = isMovingForward;

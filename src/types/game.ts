@@ -212,15 +212,17 @@ export interface KeyBindings {
   turnLeft: string[];
   turnRight: string[];
   shoot: string[];
+  boost?: string[];
 }
 
 export const DEFAULT_KEY_BINDINGS: KeyBindings = {
-  thrust: ['KeyW', 'ArrowUp'],
+  thrust: ['KeyW', 'ArrowUp', 'ShiftLeft', 'ShiftRight'],
   land: ['KeyS', 'ArrowDown', 'KeyL'], // S, Down Arrow, and L by default!
   reverse: ['KeyS', 'ArrowDown'],
   turnLeft: ['KeyA', 'ArrowLeft'],
   turnRight: ['KeyD', 'ArrowRight'],
   shoot: ['Space', 'KeyF'],
+  boost: ['ShiftLeft', 'ShiftRight'],
 };
 
 export interface GameSettings {
@@ -231,6 +233,7 @@ export interface GameSettings {
   soundEnabled: boolean;
   showMinimap: boolean;
   keyBindings?: KeyBindings;
+  rotateWithMouse?: boolean;
 }
 
 export interface GameStats {

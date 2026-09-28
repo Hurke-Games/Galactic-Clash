@@ -25,7 +25,12 @@ const ACTIONS: ActionDef[] = [
   {
     key: 'thrust',
     label: 'Thrust / Liftoff',
-    description: 'Launch ship off planet into space & accelerate forward',
+    description: 'Launch ship off planet into space & accelerate forward (W, ↑, Shift)',
+  },
+  {
+    key: 'boost',
+    label: 'Hyper-Thrust / Boost',
+    description: 'Engage high-velocity afterburners (Defaults: Left Shift, Right Shift)',
   },
   {
     key: 'turnLeft',
@@ -45,7 +50,7 @@ const ACTIONS: ActionDef[] = [
   {
     key: 'shoot',
     label: 'Fire Lasers',
-    description: 'Discharge plasma cannons at rival ships & planetary structures',
+    description: 'Discharge plasma cannons (Space, F, or Left Mouse Button)',
   },
 ];
 

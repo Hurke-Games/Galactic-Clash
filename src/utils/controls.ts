@@ -1,6 +1,6 @@
 import { KeyBindings, DEFAULT_KEY_BINDINGS } from '../types/game';
 
-const STORAGE_KEY = 'galactic_clash_key_bindings_v1';
+const STORAGE_KEY = 'galactic_clash_key_bindings_v2';
 
 export function loadKeyBindings(): KeyBindings {
   try {
@@ -14,6 +14,7 @@ export function loadKeyBindings(): KeyBindings {
         turnLeft: Array.isArray(parsed.turnLeft) && parsed.turnLeft.length ? parsed.turnLeft : DEFAULT_KEY_BINDINGS.turnLeft,
         turnRight: Array.isArray(parsed.turnRight) && parsed.turnRight.length ? parsed.turnRight : DEFAULT_KEY_BINDINGS.turnRight,
         shoot: Array.isArray(parsed.shoot) && parsed.shoot.length ? parsed.shoot : DEFAULT_KEY_BINDINGS.shoot,
+        boost: Array.isArray(parsed.boost) && parsed.boost.length ? parsed.boost : DEFAULT_KEY_BINDINGS.boost,
       };
     }
   } catch (err) {

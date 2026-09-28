@@ -1,7 +1,7 @@
 import React from 'react';
 import { KeyBindings, GameSettings } from '../types/game';
 import { KeyBindingsEditor } from './KeyBindingsEditor';
-import { Settings, Volume2, VolumeX, Map, X, Check } from 'lucide-react';
+import { Settings, Volume2, VolumeX, Map, X, Check, MousePointer } from 'lucide-react';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -53,7 +53,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
 
         {/* Quick Toggles */}
-        <div className="grid grid-cols-2 gap-3 mb-5">
+        <div className="grid grid-cols-2 gap-3 mb-4">
           <button
             type="button"
             onClick={() => onUpdateSettings({ ...settings, soundEnabled: !settings.soundEnabled })}
@@ -84,6 +84,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <span>Galaxy Radar: {settings.showMinimap ? 'Visible' : 'Hidden'}</span>
           </button>
         </div>
+
+        {/* Mouse Aim / Rotation Checkbox */}
+        <label className="flex items-center gap-3 p-3 rounded-xl border border-slate-800 bg-slate-950/60 hover:border-cyan-500/40 cursor-pointer transition-all mb-5 group">
+          <input
+            type="checkbox"
+            checked={!!settings.rotateWithMouse}
+            onChange={(e) => onUpdateSettings({ ...settings, rotateWithMouse: e.target.checked })}
+            className="w-4 h-4 rounded text-cyan-500 bg-slate-900 border-slate-700 focus:ring-cyan-500 focus:ring-offset-slate-900 accent-cyan-500 cursor-pointer"
+          />
+          <div className="flex-1">
+            <div className="flex items-center gap-2 text-xs font-bold text-white">
+              <MousePointer className="w-3.5 h-3.5 text-cyan-400 group-hover:scale-110 transition-transform" />
+              <span>Rotate Ship with Mouse</span>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              Automatically aim and turn your ship toward the mouse cursor (Left Mouse Button to shoot)
+            </p>
+          </div>
+        </label>
 
         {/* Key Bindings Section */}
         <div className="mb-5">

@@ -182,7 +182,7 @@ export const HUD: React.FC<HUDProps> = ({
               <div className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold flex items-center gap-1.5">
                 <span>Thrust Boost</span>
                 <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 font-mono text-[9px] font-bold border border-amber-500/30">
-                  CTRL · 2X
+                  SHIFT · 2X
                 </span>
               </div>
               <div className="flex items-center gap-2 mt-0.5">
@@ -245,7 +245,7 @@ export const HUD: React.FC<HUDProps> = ({
           <span className="text-slate-600">·</span>
           <div className="flex items-center gap-1 font-mono text-amber-300 font-semibold">
             <span className="px-1.5 py-0.5 rounded bg-slate-900 border border-amber-600/60 shadow-sm shadow-amber-500/20">
-              CTRL
+              SHIFT
             </span>
             <span className="text-slate-400 ml-1">2x Boost</span>
           </div>
@@ -259,7 +259,7 @@ export const HUD: React.FC<HUDProps> = ({
           <span className="text-slate-600">·</span>
           <div className="flex items-center gap-1 font-mono text-cyan-300 font-semibold">
             <span className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700">
-              {keyBindings?.shoot?.map((k) => formatKeyCode(k)).join(' / ') || 'Space / F'}
+              Space / Mouse L
             </span>
             <span className="text-slate-400 ml-1">Fire</span>
           </div>

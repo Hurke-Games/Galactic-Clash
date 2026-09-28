@@ -91,19 +91,6 @@ export default function App() {
 
   const shipsRadarRef = useRef<ShipRadarMarker[]>([]);
 
-  // Toggle fullscreen via 'F' shortcut
-  useEffect(() => {
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'f' || e.key === 'F') {
-        const tag = (e.target as HTMLElement)?.tagName;
-        if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-        setIsWebsiteMode((prev) => !prev);
-      }
-    };
-    window.addEventListener('keydown', handleKey);
-    return () => window.removeEventListener('keydown', handleKey);
-  }, []);
-
   // Manage body scrolling depending on mode
   useEffect(() => {
     if (isWebsiteMode) {
@@ -269,15 +256,15 @@ export default function App() {
       right: 'KeyD',
       shoot: 'Space',
       land: 'KeyL',
-      boost: 'ControlLeft',
+      boost: 'ShiftLeft',
     };
     const code = codeMap[action];
     const eventType = isDown ? 'keydown' : 'keyup';
     window.dispatchEvent(
       new KeyboardEvent(eventType, {
         code,
-        key: action === 'boost' ? 'Control' : undefined,
-        ctrlKey: action === 'boost' && isDown,
+        key: action === 'boost' ? 'Shift' : undefined,
+        shiftKey: action === 'boost' && isDown,
       })
     );
   };
@@ -458,7 +445,6 @@ export default function App() {
               >
                 <Maximize2 className="w-3.5 h-3.5 stroke-[2.5]" />
                 <span>PLAY FULLSCREEN</span>
-                <span className="hidden md:inline text-[10px] opacity-75 font-mono ml-0.5">[F]</span>
               </button>
             </div>
           </header>
@@ -482,10 +468,10 @@ export default function App() {
 
               <div className="flex items-center gap-2 text-xs text-slate-400 font-mono">
                 <span className="px-2 py-1 rounded bg-slate-900 border border-slate-800 text-slate-300">
-                  WASD / Arrows = Flight
+                  WASD / Shift = Flight & Boost
                 </span>
                 <span className="px-2 py-1 rounded bg-slate-900 border border-slate-800 text-slate-300">
-                  Space = Fire
+                  Space / Left Click = Fire
                 </span>
                 <span className="px-2 py-1 rounded bg-slate-900 border border-slate-800 text-cyan-400">
                   L = Land
@@ -501,7 +487,7 @@ export default function App() {
                   <Radio className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
                   <span className="text-cyan-400 font-semibold">TACTICAL HUD VIEWPORT</span>
                   <span className="text-slate-600">|</span>
-                  <span className="text-slate-400 hidden sm:inline">PROCEED WITH WASD / SPACE</span>
+                  <span className="text-slate-400 hidden sm:inline">PROCEED WITH WASD / SHIFT / LEFT CLICK</span>
                 </div>
 
                 <div className="flex items-center gap-3">
@@ -511,7 +497,7 @@ export default function App() {
                     className="flex items-center gap-1 text-cyan-400 hover:text-cyan-300 text-xs font-semibold py-0.5 px-2 rounded bg-cyan-950/60 border border-cyan-500/30 hover:bg-cyan-900/60 transition-colors"
                   >
                     <Maximize2 className="w-3 h-3" />
-                    <span>Expand [F]</span>
+                    <span>Expand Fullscreen</span>
                   </button>
                 </div>
               </div>
@@ -532,13 +518,16 @@ export default function App() {
                 </div>
                 <ul className="text-xs text-slate-300 space-y-2 leading-relaxed font-sans">
                   <li>
-                    <strong className="text-white">WASD / Arrow Keys:</strong> Newtonian inertia physics. Tap reverse to decelerate or stabilize.
+                    <strong className="text-white">WASD / Shift:</strong> Newtonian inertia physics. W or Shift accelerates forward.
                   </li>
                   <li>
-                    <strong className="text-white">Spacebar:</strong> Twin high-frequency plasma blasters with continuous firing.
+                    <strong className="text-white">Left Mouse / Space:</strong> Continuous twin plasma blaster cannons.
                   </li>
                   <li>
-                    <strong className="text-white">Left Control:</strong> Afterburner boost providing 2X top-speed surge (regenerates over time).
+                    <strong className="text-white">Left & Right Shift:</strong> Hyper-thrust afterburner boost for 2X top-speed tactical surge.
+                  </li>
+                  <li>
+                    <strong className="text-white">Mouse Aiming:</strong> Toggle "Rotate Ship with Mouse" in Settings to aim directly at your cursor.
                   </li>
                   <li>
                     <strong className="text-white">Key [L]:</strong> Land on any planet when in proximity to colonize or repair.
@@ -638,11 +627,11 @@ export default function App() {
           {/* Floating Button to Switch back to Website View */}
           <button
             onClick={() => setIsWebsiteMode(true)}
-            title="Exit Fullscreen & View Field Manual [F]"
+            title="Exit Fullscreen & View Field Manual"
             className="absolute top-3 right-3 z-40 px-3 py-1.5 rounded-lg bg-slate-900/90 hover:bg-slate-800 text-slate-200 hover:text-white border border-cyan-500/40 backdrop-blur-md text-xs font-mono flex items-center gap-1.5 shadow-[0_0_15px_rgba(6,182,212,0.2)] transition-all"
           >
             <Minimize2 className="w-3.5 h-3.5 text-cyan-400" />
-            <span>Website View [F]</span>
+            <span>Website View</span>
           </button>
         </div>
       )}
