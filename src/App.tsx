@@ -8,10 +8,12 @@ import {
   GameStats,
   ShipRadarMarker,
   KeyBindings,
+  ShipClass,
 } from './types/game';
 import { generateGalaxy } from './utils/galaxyGenerator';
 import { sound } from './utils/audio';
 import { loadKeyBindings, saveKeyBindings } from './utils/controls';
+import { checkAndUnlockNext } from './utils/shipProgression';
 import { GameCanvas } from './components/GameCanvas';
 import { HUD } from './components/HUD';
 import { NewGameModal } from './components/NewGameModal';
@@ -80,6 +82,9 @@ export default function App() {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState<boolean>(false);
   const [isGameOver, setIsGameOver] = useState<boolean>(false);
   const [winnerFactionId, setWinnerFactionId] = useState<FactionId>('player');
+  const [playerSpecialCooldown, setPlayerSpecialCooldown] = useState<number>(0);
+  const [unlockedShipClass, setUnlockedShipClass] = useState<ShipClass | null>(null);
+  const specialTriggerRef = useRef<(() => void) | null>(null);
 
   const [stats, setStats] = useState<GameStats>({
     elapsedTime: 0,
@@ -180,16 +185,24 @@ export default function App() {
     });
     setPlayerHp(5);
     setMaxPlayerHp(5);
+    setPlayerSpecialCooldown(0);
+    setUnlockedShipClass(null);
     setIsGameOver(false);
     setIsPaused(false);
     setIsNewGameModalOpen(false);
     sound.enabled = cfg.soundEnabled;
   }, []);
 
-  // Initialize on mount
+  // Initialize galaxy and game session once on mount only
   useEffect(() => {
     initGame(settings);
-  }, [initGame, settings]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Keep audio synthesizer state in sync with settings without restarting the game
+  useEffect(() => {
+    sound.enabled = settings.soundEnabled;
+  }, [settings.soundEnabled]);
 
   const handleUpdateStats = useCallback((delta: Partial<GameStats>) => {
     setStats((prev) => ({
@@ -207,10 +220,13 @@ export default function App() {
     setIsGameOver(true);
     if (winnerId === 'player') {
       sound.playVictory();
+      const newlyUnlocked = checkAndUnlockNext(settings.playerShipClass || 'standard');
+      setUnlockedShipClass(newlyUnlocked);
     } else {
       sound.playExplosion(true);
+      setUnlockedShipClass(null);
     }
-  }, []);
+  }, [settings.playerShipClass]);
 
   const handlePlayerHpChange = useCallback((hp: number, maxHp: number) => {
     setPlayerHp(hp);
@@ -222,10 +238,12 @@ export default function App() {
   }, []);
 
   const handleToggleSound = useCallback(() => {
-    const next = !settings.soundEnabled;
-    sound.enabled = next;
-    setSettings((s) => ({ ...s, soundEnabled: next }));
-  }, [settings.soundEnabled]);
+    setSettings((prev) => {
+      const next = !prev.soundEnabled;
+      sound.enabled = next;
+      return { ...prev, soundEnabled: next };
+    });
+  }, []);
 
   const handleTogglePause = useCallback(() => {
     setIsPaused((p) => !p);
@@ -284,6 +302,8 @@ export default function App() {
           onPlayerBoostChange={handlePlayerBoostChange}
           onPlayerBuffsChange={handlePlayerBuffsChange}
           onPlanetsChange={handlePlanetsChange}
+          onPlayerSpecialCooldownChange={setPlayerSpecialCooldown}
+          specialTriggerRef={specialTriggerRef}
           isPaused={isPaused || isGameOver || isNewGameModalOpen || isSettingsModalOpen}
           shipsRadarRef={shipsRadarRef}
           keyBindings={keyBindings}
@@ -298,6 +318,9 @@ export default function App() {
           playerBoost={playerBoost}
           maxPlayerBoost={maxPlayerBoost}
           playerBuffs={playerBuffs}
+          playerShipClass={settings.playerShipClass || 'standard'}
+          specialCooldown={playerSpecialCooldown}
+          onTriggerSpecial={() => specialTriggerRef.current?.()}
           factions={factions}
           planets={planets}
           stats={stats}
@@ -663,6 +686,7 @@ export default function App() {
         factions={factions}
         stats={stats}
         onPlayAgain={() => initGame(settings)}
+        unlockedShipClass={unlockedShipClass}
       />
     </>
   );

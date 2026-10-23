@@ -52,6 +52,11 @@ const ACTIONS: ActionDef[] = [
     label: 'Fire Lasers',
     description: 'Discharge plasma cannons (Space, F, or Left Mouse Button)',
   },
+  {
+    key: 'special',
+    label: 'Special Ability',
+    description: 'Trigger class special power (EMP Shockwave, Drones, Death Beam). Defaults: E, Q, Right Click',
+  },
 ];
 
 export const KeyBindingsEditor: React.FC<KeyBindingsEditorProps> = ({ bindings, onChange }) => {

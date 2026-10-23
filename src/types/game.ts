@@ -1,5 +1,7 @@
 export type FactionId = 'player' | 'bot_1' | 'bot_2' | 'bot_3';
 
+export type ShipClass = 'standard' | 'interceptor' | 'commander' | 'heavy_frigate';
+
 export type AIAggression = 'passive' | 'balanced' | 'aggressive' | 'berserker' | 'expansionist';
 
 export interface FactionConfig {
@@ -89,6 +91,7 @@ export interface Planet {
   lastLandedBy: FactionId | null;
   lastAttackedTime?: number;
   lastAttackedBy?: FactionId | null;
+  empTurretTimer?: number;
 }
 
 export interface Star {
@@ -152,6 +155,11 @@ export interface Ship {
   forceFightTimer?: number;
   planetLandingCooldownId?: string | null;
   planetLandingCooldown?: number;
+  // Ship Class & Special Ability
+  shipClass?: ShipClass;
+  specialCooldown: number;
+  empDisabledTimer?: number;
+  dashTimer?: number;
 }
 
 export interface ShipRadarMarker {
@@ -176,6 +184,7 @@ export interface Projectile {
   damage: number;
   lifespan: number; // Remaining time in seconds
   radius: number;
+  isFlak?: boolean;
   isHomingRocket?: boolean;
   homingTargetType?: 'ship' | 'building' | 'space_station' | 'colony_ship';
   homingTargetId?: string | null;
@@ -213,6 +222,7 @@ export interface KeyBindings {
   turnRight: string[];
   shoot: string[];
   boost?: string[];
+  special?: string[];
 }
 
 export const DEFAULT_KEY_BINDINGS: KeyBindings = {
@@ -223,6 +233,7 @@ export const DEFAULT_KEY_BINDINGS: KeyBindings = {
   turnRight: ['KeyD', 'ArrowRight'],
   shoot: ['Space', 'KeyF'],
   boost: ['ShiftLeft', 'ShiftRight'],
+  special: ['KeyE', 'KeyQ'],
 };
 
 export interface GameSettings {
@@ -234,6 +245,51 @@ export interface GameSettings {
   showMinimap: boolean;
   keyBindings?: KeyBindings;
   rotateWithMouse?: boolean;
+  playerShipClass?: ShipClass;
+  allowedAiShipClasses?: ShipClass[];
+}
+
+export interface AttackDrone {
+  id: string;
+  ownerId: FactionId;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  angle: number;
+  hp: number;
+  maxHp: number;
+  targetPlanetId: string | null;
+  orbitAngle: number;
+  orbitDist: number;
+  fireCooldown: number;
+  lifespan: number;
+}
+
+export interface DeathBeam {
+  id: string;
+  ownerId: FactionId;
+  startX: number;
+  startY: number;
+  angle: number;
+  width: number;
+  length: number;
+  duration: number;
+  elapsed: number;
+  color: string;
+}
+
+export interface EMPWave {
+  id: string;
+  ownerId: FactionId;
+  x: number;
+  y: number;
+  radius: number;
+  maxRadius: number;
+  expandSpeed: number;
+  duration: number;
+  elapsed: number;
+  color: string;
 }
 
 export interface GameStats {

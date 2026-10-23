@@ -15,6 +15,7 @@ export function loadKeyBindings(): KeyBindings {
         turnRight: Array.isArray(parsed.turnRight) && parsed.turnRight.length ? parsed.turnRight : DEFAULT_KEY_BINDINGS.turnRight,
         shoot: Array.isArray(parsed.shoot) && parsed.shoot.length ? parsed.shoot : DEFAULT_KEY_BINDINGS.shoot,
         boost: Array.isArray(parsed.boost) && parsed.boost.length ? parsed.boost : DEFAULT_KEY_BINDINGS.boost,
+        special: Array.isArray(parsed.special) && parsed.special.length ? parsed.special : DEFAULT_KEY_BINDINGS.special,
       };
     }
   } catch (err) {

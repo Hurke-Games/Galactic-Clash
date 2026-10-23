@@ -14,6 +14,10 @@ import {
   ColonyShip,
   KeyBindings,
   DEFAULT_KEY_BINDINGS,
+  ShipClass,
+  AttackDrone,
+  DeathBeam,
+  EMPWave,
 } from '../types/game';
 import { distance, angleBetween, getBuildingWorldPos, shortestAngleDiff } from '../utils/physics';
 import { updateAIShip } from '../utils/aiController';
@@ -35,6 +39,8 @@ interface GameCanvasProps {
     hasHomingRockets: boolean;
   }) => void;
   onPlanetsChange: (planets: Planet[]) => void;
+  onPlayerSpecialCooldownChange?: (cooldown: number) => void;
+  specialTriggerRef?: React.MutableRefObject<(() => void) | null>;
   isPaused: boolean;
   shipsRadarRef?: React.MutableRefObject<ShipRadarMarker[]>;
   keyBindings?: KeyBindings;
@@ -50,6 +56,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   onPlayerBoostChange,
   onPlayerBuffsChange,
   onPlanetsChange,
+  onPlayerSpecialCooldownChange,
+  specialTriggerRef,
   isPaused,
   shipsRadarRef,
   keyBindings,
@@ -68,6 +76,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   const onUpdateStatsRef = useRef(onUpdateStats);
   const onGameOverRef = useRef(onGameOver);
   const onPlanetsChangeRef = useRef(onPlanetsChange);
+  const onPlayerSpecialCooldownChangeRef = useRef(onPlayerSpecialCooldownChange);
 
   useEffect(() => {
     onPlayerHpChangeRef.current = onPlayerHpChange;
@@ -76,6 +85,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     onUpdateStatsRef.current = onUpdateStats;
     onGameOverRef.current = onGameOver;
     onPlanetsChangeRef.current = onPlanetsChange;
+    onPlayerSpecialCooldownChangeRef.current = onPlayerSpecialCooldownChange;
   });
 
   const floatingTextsRef = useRef<{ id: string; x: number; y: number; text: string; color: string; alpha: number; lifespan: number }[]>([]);
@@ -89,6 +99,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     shoot: boolean;
     land: boolean;
     boost: boolean;
+    special: boolean;
   }>({
     thrust: false,
     reverse: false,
@@ -97,6 +108,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     shoot: false,
     land: false,
     boost: false,
+    special: false,
   });
 
   // Camera state
@@ -117,9 +129,13 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   const projectilesRef = useRef<Projectile[]>([]);
   const particlesRef = useRef<Particle[]>([]);
   const explosionsRef = useRef<Explosion[]>([]);
+  const dronesRef = useRef<AttackDrone[]>([]);
+  const empWavesRef = useRef<EMPWave[]>([]);
+  const deathBeamRef = useRef<DeathBeam | null>(null);
   const starsRef = useRef<Star[]>(stars);
   const shootKeyWasPressedRef = useRef<boolean>(false);
   const landKeyWasPressedRef = useRef<boolean>(false);
+  const specialKeyWasPressedRef = useRef<boolean>(false);
   const gameOverTriggeredRef = useRef<boolean>(false);
   const lastPlanetsReportTimeRef = useRef<number>(0);
 
@@ -141,11 +157,18 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   }, []);
 
   // Initialize ships on the edge of the world they own in 'landed' state
+  // Initialize ships on the edge of the world they own in 'landed' state
   // Only runs when stars change (new game)
   useEffect(() => {
     starsRef.current = stars;
     const initialShips: Ship[] = [];
     const allPlanets = getAllPlanets();
+
+    const playerChosenClass: ShipClass = settings.playerShipClass || 'standard';
+    const aiPool: ShipClass[] =
+      settings.allowedAiShipClasses && settings.allowedAiShipClasses.length > 0
+        ? settings.allowedAiShipClasses
+        : ['standard'];
 
     factions.forEach((faction, idx) => {
       const homePlanet = allPlanets.find((p) => p.ownerId === faction.id);
@@ -157,6 +180,13 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         ? homePlanet.y + Math.sin(spawnAngle) * (homePlanet.radius + 6)
         : 0;
 
+      const chosenClass: ShipClass = faction.isHuman
+        ? playerChosenClass
+        : aiPool[Math.floor(Math.random() * aiPool.length)];
+
+      const baseHp = chosenClass === 'interceptor' ? 3 : chosenClass === 'heavy_frigate' ? 7 : 5;
+      const baseShield = chosenClass === 'heavy_frigate' ? 20 : 0;
+
       initialShips.push({
         id: `ship_${faction.id}`,
         ownerId: faction.id,
@@ -166,8 +196,12 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         vy: 0,
         angle: spawnAngle, // facing outward into space
         thrusting: false,
-        hp: 5,
-        maxHp: 5,
+        hp: baseHp,
+        maxHp: baseHp,
+        shipClass: chosenClass,
+        specialCooldown: 0,
+        empDisabledTimer: 0,
+        dashTimer: 0,
         fireCooldown: 0,
         respawnTimer: 0,
         isDead: false,
@@ -178,8 +212,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         boost: 100,
         maxBoost: 100,
         boosting: false,
-        shieldHp: 0,
-        maxShieldHp: 0,
+        shieldHp: baseShield,
+        maxShieldHp: baseShield,
         hasDoubleDamage: false,
         hasHomingRockets: false,
         flightState: 'landed',
@@ -195,6 +229,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     projectilesRef.current = [];
     particlesRef.current = [];
     explosionsRef.current = [];
+    dronesRef.current = [];
+    empWavesRef.current = [];
+    deathBeamRef.current = null;
     gameOverTriggeredRef.current = false;
 
     // Center camera on player
@@ -214,8 +251,11 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           hasHomingRockets: playerShip.hasHomingRockets,
         });
       }
+      if (onPlayerSpecialCooldownChangeRef.current) {
+        onPlayerSpecialCooldownChangeRef.current(0);
+      }
     }
-  }, [stars, factions, getAllPlanets]);
+  }, [stars, factions, getAllPlanets, settings.playerShipClass, settings.allowedAiShipClasses]);
 
   // Keyboard handlers: Dynamic bindings with S, Down Arrow, and L for landing
   useEffect(() => {
@@ -242,6 +282,11 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         landKeyWasPressedRef.current = true;
       }
 
+      const isSpecial = (bindings.special && matchesBinding(e, bindings.special)) || e.code === 'KeyE' || e.code === 'KeyQ';
+      if (isSpecial) {
+        keysRef.current.special = true;
+      }
+
       // Boost & Thrust: Left & Right Shift by default, plus Ctrl as alternate
       const isShift = e.key === 'Shift' || e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.shiftKey;
       const isCtrl = e.key === 'Control' || e.code === 'ControlLeft' || e.code === 'ControlRight' || e.ctrlKey;
@@ -261,6 +306,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       const isRight = matchesBinding(e, bindings.turnRight);
       const isShoot = matchesBinding(e, bindings.shoot) || e.code === 'KeyF' || e.code === 'Space';
       const isLand = matchesBinding(e, bindings.land);
+      const isSpecial = (bindings.special && matchesBinding(e, bindings.special)) || e.code === 'KeyE' || e.code === 'KeyQ';
 
       if (isUp) keysRef.current.thrust = false;
       if (isDown) keysRef.current.reverse = false;
@@ -273,6 +319,10 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       if (isLand) {
         keysRef.current.land = false;
         landKeyWasPressedRef.current = false;
+      }
+      if (isSpecial) {
+        keysRef.current.special = false;
+        specialKeyWasPressedRef.current = false;
       }
 
       const isShift = e.key === 'Shift' || e.code === 'ShiftLeft' || e.code === 'ShiftRight';
@@ -297,6 +347,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         shoot: false,
         land: false,
         boost: false,
+        special: false,
       };
       mousePosRef.current.active = false;
     };
@@ -307,10 +358,12 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       cameraRef.current.targetZoom = Math.max(0.35, Math.min(1.4, cameraRef.current.targetZoom + zoomDelta));
     };
 
-    // Left Mouse Button Shooting
+    // Left Mouse Button Shooting, Right Mouse Button Special
     const handleMouseDown = (e: MouseEvent) => {
       if (e.button === 0) {
         keysRef.current.shoot = true;
+      } else if (e.button === 2) {
+        keysRef.current.special = true;
       }
     };
 
@@ -318,7 +371,14 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       if (e.button === 0) {
         keysRef.current.shoot = false;
         shootKeyWasPressedRef.current = false;
+      } else if (e.button === 2) {
+        keysRef.current.special = false;
+        specialKeyWasPressedRef.current = false;
       }
+    };
+
+    const handleContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
     };
 
     // Mouse Tracking for Ship Rotation
@@ -347,6 +407,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       canvas.addEventListener('mousedown', handleMouseDown);
       canvas.addEventListener('mousemove', handleMouseMove);
       canvas.addEventListener('mouseleave', handleMouseLeave);
+      canvas.addEventListener('contextmenu', handleContextMenu);
     }
 
     return () => {
@@ -359,6 +420,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         canvas.removeEventListener('mousedown', handleMouseDown);
         canvas.removeEventListener('mousemove', handleMouseMove);
         canvas.removeEventListener('mouseleave', handleMouseLeave);
+        canvas.removeEventListener('contextmenu', handleContextMenu);
       }
     };
   }, []);
@@ -406,6 +468,185 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       color,
       alpha: 1,
       lifespan: 2.2,
+    });
+  };
+
+  // Special Ability Trigger (EMP Wave, 10 Attack Drones, or Sector Death Beam)
+  const triggerSpecial = useCallback((ship: Ship) => {
+    if (ship.isDead) return;
+    if (ship.specialCooldown && ship.specialCooldown > 0) return;
+    if (ship.empDisabledTimer && ship.empDisabledTimer > 0) return;
+
+    const shipClass = ship.shipClass || 'standard';
+
+    if (shipClass === 'interceptor') {
+      // EMP shockwave (every 30s, disables flight control & turrets for 10s within 1500px generous range)
+      ship.specialCooldown = 30;
+      const empRadius = 1500;
+      const empDuration = 10;
+      empWavesRef.current.push({
+        id: `emp_${Date.now()}_${Math.random()}`,
+        ownerId: ship.ownerId,
+        x: ship.x,
+        y: ship.y,
+        maxRadius: empRadius,
+        radius: 10,
+        expandSpeed: 1400,
+        duration: empDuration,
+        elapsed: 0,
+        color: '#38bdf8',
+      });
+
+      // Disable enemy ships flight control & firing
+      shipsRef.current.forEach((target) => {
+        if (!target.isDead && target.ownerId !== ship.ownerId) {
+          const d = distance(ship.x, ship.y, target.x, target.y);
+          if (d <= empRadius) {
+            target.empDisabledTimer = empDuration;
+            target.thrusting = false;
+            target.boosting = false;
+            addFloatingText(target.x, target.y - 24, '⚡ EMP DISABLED (10s)', '#38bdf8');
+          }
+        }
+      });
+
+      // Disable enemy planet turrets
+      const allPlanets = getAllPlanets();
+      allPlanets.forEach((p) => {
+        if (p.ownerId && p.ownerId !== ship.ownerId) {
+          const d = distance(ship.x, ship.y, p.x, p.y);
+          if (d <= empRadius + p.radius) {
+            p.empTurretTimer = empDuration;
+            addFloatingText(p.x, p.y - p.radius - 20, '⚡ TURRETS OFFLINE (10s)', '#38bdf8');
+          }
+        }
+      });
+
+      sound.playEMP();
+      addFloatingText(ship.x, ship.y - 28, '⚡ EMP SHOCKWAVE DISCHARGED!', '#38bdf8');
+    } else if (shipClass === 'commander') {
+      // Deploy 10 mini attack drones (survive 2 shots, aggressively attack nearest unallied planet)
+      ship.specialCooldown = 30;
+      const allPlanets = getAllPlanets();
+
+      let nearestUnallied: Planet | null = null;
+      let minDist = Infinity;
+      allPlanets.forEach((p) => {
+        if (p.ownerId !== ship.ownerId) {
+          const d = distance(ship.x, ship.y, p.x, p.y);
+          if (d < minDist) {
+            minDist = d;
+            nearestUnallied = p;
+          }
+        }
+      });
+
+      for (let i = 0; i < 10; i++) {
+        const spreadAngle = (i / 10) * Math.PI * 2;
+        const orbitRadius = 65 + (i % 3) * 20;
+        dronesRef.current.push({
+          id: `drone_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`,
+          ownerId: ship.ownerId,
+          x: ship.x + Math.cos(spreadAngle) * 20,
+          y: ship.y + Math.sin(spreadAngle) * 20,
+          vx: Math.cos(spreadAngle) * 60 + ship.vx * 0.3,
+          vy: Math.sin(spreadAngle) * 60 + ship.vy * 0.3,
+          angle: spreadAngle,
+          targetPlanetId: nearestUnallied ? (nearestUnallied as Planet).id : null,
+          hp: 2,
+          maxHp: 2,
+          orbitAngle: spreadAngle,
+          orbitDist: orbitRadius,
+          fireCooldown: 0.3 + Math.random() * 0.6,
+          lifespan: 45,
+        });
+      }
+
+      sound.playDroneLaunch();
+      addFloatingText(ship.x, ship.y - 28, '🛸 10 DRONES DEPLOYED!', '#10b981');
+    } else if (shipClass === 'heavy_frigate') {
+      // Death Beam (twice as wide as a planet, spans clear across map, obliterates all ships & installations)
+      ship.specialCooldown = 30;
+      deathBeamRef.current = {
+        id: `beam_${Date.now()}`,
+        ownerId: ship.ownerId,
+        startX: ship.x,
+        startY: ship.y,
+        angle: ship.angle,
+        width: 190,
+        length: 14000,
+        duration: 1.8,
+        elapsed: 0,
+        color: '#ef4444',
+      };
+
+      sound.playDeathBeam();
+      addFloatingText(ship.x, ship.y - 28, '☠️ SECTOR DEATH BEAM!', '#ef4444');
+    }
+  }, [getAllPlanets]);
+
+  useEffect(() => {
+    if (specialTriggerRef) {
+      specialTriggerRef.current = () => {
+        const playerShip = shipsRef.current.find((s) => s.ownerId === 'player');
+        if (playerShip) {
+          triggerSpecial(playerShip);
+        }
+      };
+    }
+  }, [specialTriggerRef, triggerSpecial]);
+
+  const triggerFlakDetonation = (x: number, y: number, ownerId: FactionId) => {
+    createExplosion(x, y, '#f97316', 45, true);
+    sound.playExplosion(true);
+    const blastRadius = 80;
+    const allPlanets = getAllPlanets();
+
+    allPlanets.forEach((p) => {
+      if (p.ownerId && p.ownerId !== ownerId) {
+        p.buildings.forEach((bld) => {
+          if (bld.hp > 0) {
+            const bPos = getBuildingWorldPos(p.x, p.y, p.radius, bld.angleOnPlanet);
+            if (distance(x, y, bPos.x, bPos.y) <= blastRadius) {
+              bld.hp -= 25;
+              if (bld.hp <= 0) {
+                createExplosion(bPos.x, bPos.y, '#ef4444', 30, true);
+                onUpdateStatsRef.current({ buildingsDestroyed: 1 });
+              }
+            }
+          }
+        });
+
+        if (p.spaceStation && p.spaceStation.ownerId !== ownerId && p.spaceStation.hp > 0) {
+          const stX = p.x + Math.cos(p.spaceStation.angle) * p.spaceStation.distance;
+          const stY = p.y + Math.sin(p.spaceStation.angle) * p.spaceStation.distance;
+          if (distance(x, y, stX, stY) <= blastRadius) {
+            p.spaceStation.hp -= 20;
+            if (p.spaceStation.hp <= 0) {
+              p.spaceStation = null;
+              createExplosion(stX, stY, '#ef4444', 40, true);
+            }
+          }
+        }
+      }
+    });
+
+    shipsRef.current.forEach((s) => {
+      if (!s.isDead && s.ownerId !== ownerId) {
+        if (distance(x, y, s.x, s.y) <= blastRadius) {
+          if (s.shieldHp > 0) {
+            s.shieldHp = Math.max(0, s.shieldHp - 25);
+          } else {
+            s.hp -= 2;
+          }
+          if (s.hp <= 0) {
+            s.isDead = true;
+            s.respawnTimer = 10;
+            createExplosion(s.x, s.y, '#f43f5e', 45, true);
+            onUpdateStatsRef.current({ shipsDestroyed: 1 });
+          }
+        }
+      }
     });
   };
 
@@ -634,6 +875,68 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
   // Helper to spawn ship projectile straight out the front (with Double Damage & Homing Rockets)
   const fireShipProjectile = (ship: Ship, faction: FactionConfig) => {
+    // 1. Heavy Frigate: Heavy Flak Cannon (AoE flak burst on detonation)
+    if (ship.shipClass === 'heavy_frigate') {
+      const flakDist = 12;
+      const px = ship.x + Math.cos(ship.angle) * flakDist;
+      const py = ship.y + Math.sin(ship.angle) * flakDist;
+      const flakSpeed = 240;
+
+      projectilesRef.current.push({
+        id: `flak_${Math.random()}`,
+        ownerId: ship.ownerId,
+        sourceType: 'ship',
+        x: px,
+        y: py,
+        vx: Math.cos(ship.angle) * flakSpeed + ship.vx * 0.25,
+        vy: Math.sin(ship.angle) * flakSpeed + ship.vy * 0.25,
+        angle: ship.angle,
+        color: '#f97316',
+        damage: 4,
+        lifespan: 2.2,
+        radius: 5.5,
+        isFlak: true,
+      });
+
+      sound.playFlakShot();
+      onUpdateStatsRef.current({ shotsFired: 1 });
+      return;
+    }
+
+    // 2. Interceptor: Rapid Dual Wingtip Blasters
+    if (ship.shipClass === 'interceptor') {
+      const projSpeed = 340;
+      const baseDamage = ship.hasDoubleDamage ? 2 : 1;
+      const laserColor = ship.hasDoubleDamage ? '#f59e0b' : faction.shipColor;
+      const perp = ship.angle + Math.PI / 2;
+      const wingSpread = 5.5;
+
+      [-1, 1].forEach((sign) => {
+        const wx = ship.x + Math.cos(perp) * (sign * wingSpread) + Math.cos(ship.angle) * 5;
+        const wy = ship.y + Math.sin(perp) * (sign * wingSpread) + Math.sin(ship.angle) * 5;
+
+        projectilesRef.current.push({
+          id: `dual_${Math.random()}`,
+          ownerId: ship.ownerId,
+          sourceType: 'ship',
+          x: wx,
+          y: wy,
+          vx: Math.cos(ship.angle) * projSpeed + ship.vx * 0.25,
+          vy: Math.sin(ship.angle) * projSpeed + ship.vy * 0.25,
+          angle: ship.angle,
+          color: laserColor,
+          damage: baseDamage,
+          lifespan: 2.8,
+          radius: 2.2,
+        });
+      });
+
+      sound.playLaser(1.2);
+      onUpdateStatsRef.current({ shotsFired: 2 });
+      return;
+    }
+
+    // 3. Standard & Commander: Central Blaster
     const noseDist = 9; // Scaled for half-size ship
     const px = ship.x + Math.cos(ship.angle) * noseDist;
     const py = ship.y + Math.sin(ship.angle) * noseDist;
@@ -660,7 +963,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     // If ship has Homing Rockets buff:
     if (ship.hasHomingRockets) {
       const allPlanets = getAllPlanets();
-      // Target installations on a planet including space stations, colony ships, and enemy ships!
       const target = findNearestHomingTarget(px, py, ship.angle, ship.ownerId, allPlanets, 1400);
 
       const rocketDamage = ship.hasDoubleDamage ? 4 : 2;
@@ -695,6 +997,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
   // 4 shots from Base defense
   const fireBaseTurrets = (planet: Planet, targetEnemy: Ship) => {
+    if (planet.empTurretTimer && planet.empTurretTimer > 0) return;
     const faction = factions.find((f) => f.id === planet.ownerId);
     const color = faction?.color || '#38bdf8';
     const projSpeed = 210; // Half speed (was 420)
@@ -727,6 +1030,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   // Space Station defense (4 shots: 2 close on one end, 2 on the other)
   const fireSpaceStation = (planet: Planet, targetEnemy: Ship) => {
     if (!planet.spaceStation) return;
+    if (planet.empTurretTimer && planet.empTurretTimer > 0) return;
     const station = planet.spaceStation;
     const faction = factions.find((f) => f.id === station.ownerId);
     const color = faction?.color || '#38bdf8';
@@ -1494,6 +1798,25 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         shipsRef.current.forEach((ship) => {
           const faction = factions.find((f) => f.id === ship.ownerId)!;
 
+          // Special Ability Cooldown Decrement
+          ship.specialCooldown = Math.max(0, (ship.specialCooldown || 0) - dt);
+          if (ship.ownerId === 'player' && onPlayerSpecialCooldownChangeRef.current) {
+            onPlayerSpecialCooldownChangeRef.current(ship.specialCooldown);
+          }
+
+          // Heavy Frigate Rechargeable Shields (recharges at 2.5 HP/s)
+          if (ship.shipClass === 'heavy_frigate' && !ship.isDead && ship.shieldHp < ship.maxShieldHp) {
+            ship.shieldHp = Math.min(ship.maxShieldHp, ship.shieldHp + 2.5 * dt);
+            if (ship.ownerId === 'player' && onPlayerBuffsChangeRef.current) {
+              onPlayerBuffsChangeRef.current({
+                shieldHp: Math.round(ship.shieldHp),
+                maxShieldHp: ship.maxShieldHp,
+                hasDoubleDamage: ship.hasDoubleDamage,
+                hasHomingRockets: ship.hasHomingRockets,
+              });
+            }
+          }
+
           // RESPAWN HANDLING
           if (ship.isDead) {
             const basesOwned = allPlanets.filter(
@@ -1516,6 +1839,11 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
               ship.hp = ship.maxHp;
               ship.boost = ship.maxBoost;
               ship.boosting = false;
+              ship.specialCooldown = 0;
+              ship.empDisabledTimer = 0;
+              if (ship.shipClass === 'heavy_frigate') {
+                ship.shieldHp = ship.maxShieldHp;
+              }
               ship.flightState = 'landed';
               ship.landedPlanetId = respawnPlanet.id;
               ship.surfaceAngle = Math.random() * Math.PI * 2;
@@ -1537,6 +1865,33 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                   onPlayerBoostChangeRef.current(ship.boost, ship.maxBoost);
                 }
               }
+            }
+            return;
+          }
+
+          // EMP Shockwave Flight Inhibit
+          if (ship.empDisabledTimer && ship.empDisabledTimer > 0) {
+            ship.empDisabledTimer -= dt;
+            ship.thrusting = false;
+            ship.boosting = false;
+            ship.vx *= 0.985;
+            ship.vy *= 0.985;
+            ship.x += ship.vx * dt;
+            ship.y += ship.vy * dt;
+
+            // Electric EMP sparks
+            if (Math.random() < 0.25) {
+              particlesRef.current.push({
+                x: ship.x + (Math.random() - 0.5) * 14,
+                y: ship.y + (Math.random() - 0.5) * 14,
+                vx: (Math.random() - 0.5) * 40,
+                vy: (Math.random() - 0.5) * 40,
+                color: '#38bdf8',
+                size: 2,
+                alpha: 1,
+                decay: 3.5,
+                lifespan: 0,
+              });
             }
             return;
           }
@@ -1853,13 +2208,20 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
               onPlayerBoostChangeRef.current(ship.boost, ship.maxBoost);
             }
 
+            // Special Ability Trigger (E / Q / Right Click)
+            if (keysRef.current.special && !specialKeyWasPressedRef.current) {
+              specialKeyWasPressedRef.current = true;
+              triggerSpecial(ship);
+            }
+
             // Forward thrust with W / Up Arrow, Left/Right Shift, or Boost
-            const baseThrust = 290;
+            const baseThrust = ship.shipClass === 'interceptor' ? 330 : ship.shipClass === 'heavy_frigate' ? 240 : 290;
             const isMovingForward = keysRef.current.thrust || ship.boosting;
             ship.thrusting = isMovingForward;
 
             if (isMovingForward) {
-              const thrustMultiplier = ship.boosting ? 2.0 : 1.0;
+              const boostMult = ship.shipClass === 'interceptor' ? 2.6 : ship.shipClass === 'heavy_frigate' ? 1.7 : 2.0;
+              const thrustMultiplier = ship.boosting ? boostMult : 1.0;
               const thrustPower = baseThrust * thrustMultiplier;
 
               ship.vx += Math.cos(ship.angle) * thrustPower * dt;
@@ -1880,18 +2242,19 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                 });
               }
 
-              // Extra hyper-thrust exhaust particles when boosting
+              // Extra hyper-thrust exhaust particles when boosting (Evasive dash for interceptor)
               if (ship.boosting) {
-                for (let b = 0; b < 2; b++) {
+                const count = ship.shipClass === 'interceptor' ? 4 : 2;
+                for (let b = 0; b < count; b++) {
                   particlesRef.current.push({
                     x: ship.x - Math.cos(ship.angle) * 8 + (Math.random() - 0.5) * 4,
                     y: ship.y - Math.sin(ship.angle) * 8 + (Math.random() - 0.5) * 4,
-                    vx: -Math.cos(ship.angle) * 85 + (Math.random() - 0.5) * 25,
-                    vy: -Math.sin(ship.angle) * 85 + (Math.random() - 0.5) * 25,
+                    vx: -Math.cos(ship.angle) * 95 + (Math.random() - 0.5) * 25,
+                    vy: -Math.sin(ship.angle) * 95 + (Math.random() - 0.5) * 25,
                     color: Math.random() < 0.4 ? '#ffffff' : Math.random() < 0.7 ? '#38bdf8' : '#60a5fa',
-                    size: 2.5,
+                    size: ship.shipClass === 'interceptor' ? 3.0 : 2.5,
                     alpha: 1,
-                    decay: 3.8,
+                    decay: 4.2,
                     lifespan: 0,
                   });
                 }
@@ -1907,11 +2270,12 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             ship.vx *= 0.993;
             ship.vy *= 0.993;
 
-            // Shooting: holding F or Space fires repeatedly at tripled rate (~0.22s cooldown)
+            // Shooting: holding F or Space fires repeatedly at class-based rate
             ship.fireCooldown = Math.max(0, ship.fireCooldown - dt);
             if (keysRef.current.shoot && ship.fireCooldown <= 0) {
               fireShipProjectile(ship, faction);
-              ship.fireCooldown = 0.22;
+              const shootCooldown = ship.shipClass === 'interceptor' ? 0.10 : ship.shipClass === 'heavy_frigate' ? 0.45 : 0.22;
+              ship.fireCooldown = shootCooldown;
             }
 
             // Check if player is near any planet for landing prompt
@@ -1942,7 +2306,13 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             // AI COMPUTER FLIGHT IN OPEN SPACE
             const { decision } = updateAIShip(ship, faction, allPlanets, shipsRef.current, dt);
 
-            ship.angle = decision.steerAngle;
+            // Slower turning for Heavy Frigate
+            if (ship.shipClass === 'heavy_frigate') {
+              const diff = shortestAngleDiff(ship.angle, decision.steerAngle);
+              ship.angle += Math.sign(diff) * Math.min(Math.abs(diff), 2.2 * dt);
+            } else {
+              ship.angle = decision.steerAngle;
+            }
 
             const aiCanBoost = Boolean(decision.boost && ship.boost > 0);
             ship.boosting = aiCanBoost;
@@ -1957,7 +2327,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             ship.thrusting = aiMoving;
 
             if (aiMoving) {
-              const baseAIThrust = 250;
+              const baseAIThrust = ship.shipClass === 'interceptor' ? 290 : ship.shipClass === 'heavy_frigate' ? 210 : 250;
               const thrustMultiplier = ship.boosting ? 2.0 : 1.0;
               const thrustPower = baseAIThrust * thrustMultiplier;
 
@@ -1982,11 +2352,26 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             ship.vx *= 0.993;
             ship.vy *= 0.993;
 
-            // AI Shooting: Rapid, regular weapon firing rate (~0.20s)
+            // AI Special activation
+            if (ship.specialCooldown <= 0) {
+              if (ship.shipClass === 'interceptor') {
+                const nearEnemies = shipsRef.current.some(s => !s.isDead && s.ownerId !== ship.ownerId && distance(ship.x, ship.y, s.x, s.y) < 600);
+                if (nearEnemies) triggerSpecial(ship);
+              } else if (ship.shipClass === 'commander') {
+                const nearPlanet = allPlanets.some(p => p.ownerId !== ship.ownerId && distance(ship.x, ship.y, p.x, p.y) < 800);
+                if (nearPlanet) triggerSpecial(ship);
+              } else if (ship.shipClass === 'heavy_frigate') {
+                const nearHostile = shipsRef.current.some(s => !s.isDead && s.ownerId !== ship.ownerId && distance(ship.x, ship.y, s.x, s.y) < 900);
+                if (nearHostile) triggerSpecial(ship);
+              }
+            }
+
+            // AI Shooting: Class-based firing rate
             ship.fireCooldown = Math.max(0, ship.fireCooldown - dt);
             if (decision.shoot && ship.fireCooldown <= 0) {
               fireShipProjectile(ship, faction);
-              ship.fireCooldown = 0.20;
+              const aiShootCooldown = ship.shipClass === 'interceptor' ? 0.10 : ship.shipClass === 'heavy_frigate' ? 0.45 : 0.20;
+              ship.fireCooldown = aiShootCooldown;
             }
 
             // AI Landing Trigger
@@ -2087,9 +2472,26 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           proj.y += proj.vy * dt;
           proj.lifespan -= dt;
 
-          if (proj.lifespan <= 0) return;
+          if (proj.lifespan <= 0) {
+            if (proj.isFlak) {
+              triggerFlakDetonation(proj.x, proj.y, proj.ownerId);
+            }
+            return;
+          }
 
           let hit = false;
+
+          // Attack Drones Collision
+          for (const drone of dronesRef.current) {
+            if (drone.ownerId === proj.ownerId || drone.hp <= 0) continue;
+            if (distance(proj.x, proj.y, drone.x, drone.y) < 14) {
+              hit = true;
+              drone.hp -= proj.damage;
+              createExplosion(proj.x, proj.y, '#10b981', 14, false);
+              sound.playHit();
+              break;
+            }
+          }
 
           // A. Collision with Ships
           for (const ship of shipsRef.current) {
@@ -2176,7 +2578,12 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             }
           }
 
-          if (hit) return;
+          if (hit) {
+            if (proj.isFlak) {
+              triggerFlakDetonation(proj.x, proj.y, proj.ownerId);
+            }
+            return;
+          }
 
           // B. Collision with Planet Buildings (Installations)
           for (const planet of allPlanets) {
@@ -2305,12 +2712,201 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             if (hit) break;
           }
 
-          if (!hit) {
+          if (hit) {
+            if (proj.isFlak) {
+              triggerFlakDetonation(proj.x, proj.y, proj.ownerId);
+            }
+          } else {
             remainingProjectiles.push(proj);
           }
         });
 
         projectilesRef.current = remainingProjectiles;
+
+        // -------------------------------------------------------------
+        // 5B. EMP WAVES & TURRET TIMERS UPDATE
+        // -------------------------------------------------------------
+        empWavesRef.current = empWavesRef.current.filter((wave) => {
+          wave.radius += wave.expandSpeed * dt;
+          wave.elapsed += dt;
+          return wave.elapsed < 1.6 && wave.radius < wave.maxRadius;
+        });
+
+        allPlanets.forEach((p) => {
+          if (p.empTurretTimer && p.empTurretTimer > 0) {
+            p.empTurretTimer = Math.max(0, p.empTurretTimer - dt);
+          }
+        });
+
+        // -------------------------------------------------------------
+        // 5C. ATTACK DRONES UPDATE
+        // -------------------------------------------------------------
+        dronesRef.current = dronesRef.current.filter((drone) => {
+          drone.lifespan -= dt;
+          if (drone.lifespan <= 0 || drone.hp <= 0) {
+            createExplosion(drone.x, drone.y, '#10b981', 14, false);
+            return false;
+          }
+
+          // Seek nearest unallied planet
+          let activeTarget: Planet | null = null;
+          if (drone.targetPlanetId) {
+            for (const p of allPlanets) {
+              if (p.id === drone.targetPlanetId && p.ownerId !== drone.ownerId) {
+                activeTarget = p;
+                break;
+              }
+            }
+          }
+
+          if (!activeTarget) {
+            let minD = Infinity;
+            for (const p of allPlanets) {
+              if (p.ownerId !== drone.ownerId) {
+                const d = distance(drone.x, drone.y, p.x, p.y);
+                if (d < minD) {
+                  minD = d;
+                  activeTarget = p;
+                }
+              }
+            }
+            drone.targetPlanetId = activeTarget ? (activeTarget as Planet).id : null;
+          }
+
+          if (activeTarget) {
+            const targetPlanet: Planet = activeTarget;
+            drone.orbitAngle += dt * 1.5;
+            const targetX = targetPlanet.x + Math.cos(drone.orbitAngle) * (targetPlanet.radius + drone.orbitDist);
+            const targetY = targetPlanet.y + Math.sin(drone.orbitAngle) * (targetPlanet.radius + drone.orbitDist);
+
+            drone.vx += (targetX - drone.x) * 4.2 * dt;
+            drone.vy += (targetY - drone.y) * 4.2 * dt;
+            drone.vx *= 0.94;
+            drone.vy *= 0.94;
+            drone.x += drone.vx * dt;
+            drone.y += drone.vy * dt;
+            drone.angle = Math.atan2(drone.vy, drone.vx);
+
+            // Fire mini blasters at enemy installations
+            drone.fireCooldown -= dt;
+            if (drone.fireCooldown <= 0) {
+              drone.fireCooldown = 0.8 + Math.random() * 0.4;
+              const bld = targetPlanet.buildings.find((b) => b.hp > 0);
+              let targetPos = { x: targetPlanet.x, y: targetPlanet.y };
+              if (bld) {
+                targetPos = getBuildingWorldPos(targetPlanet.x, targetPlanet.y, targetPlanet.radius, bld.angleOnPlanet);
+              }
+              const aimAngle = angleBetween(drone.x, drone.y, targetPos.x, targetPos.y);
+              projectilesRef.current.push({
+                id: `drone_shot_${Math.random()}`,
+                ownerId: drone.ownerId,
+                sourceType: 'ship',
+                x: drone.x,
+                y: drone.y,
+                vx: Math.cos(aimAngle) * 280,
+                vy: Math.sin(aimAngle) * 280,
+                angle: aimAngle,
+                color: '#10b981',
+                damage: 1,
+                lifespan: 2.0,
+                radius: 2,
+              });
+            }
+          } else {
+            drone.x += drone.vx * dt;
+            drone.y += drone.vy * dt;
+          }
+          return true;
+        });
+
+        // -------------------------------------------------------------
+        // 5D. SECTOR DEATH BEAM UPDATE
+        // -------------------------------------------------------------
+        if (deathBeamRef.current) {
+          const beam = deathBeamRef.current;
+          beam.elapsed += dt;
+          if (beam.elapsed >= beam.duration) {
+            deathBeamRef.current = null;
+          } else {
+            const firingShip = shipsRef.current.find((s) => s.ownerId === beam.ownerId);
+            if (firingShip && !firingShip.isDead) {
+              beam.startX = firingShip.x;
+              beam.startY = firingShip.y;
+              beam.angle = firingShip.angle;
+            }
+
+            const cosA = Math.cos(beam.angle);
+            const sinA = Math.sin(beam.angle);
+            const halfWidth = beam.width / 2;
+
+            // Obliterate hostile ships intersecting beam corridor
+            shipsRef.current.forEach((target) => {
+              if (!target.isDead && target.ownerId !== beam.ownerId) {
+                const dx = target.x - beam.startX;
+                const dy = target.y - beam.startY;
+                const along = dx * cosA + dy * sinA;
+                const perp = Math.abs(-dx * sinA + dy * cosA);
+                if (along > 0 && along < beam.length && perp < halfWidth + 8) {
+                  target.hp -= 30 * dt;
+                  target.shieldHp = 0;
+                  if (target.hp <= 0) {
+                    target.isDead = true;
+                    target.respawnTimer = 2.5;
+                    createExplosion(target.x, target.y, '#ef4444', 45, true);
+                    onUpdateStatsRef.current({ shipsDestroyed: 1 });
+                  }
+                }
+              }
+            });
+
+            // Obliterate hostile colony ships, space stations, and planet installations
+            allPlanets.forEach((p) => {
+              p.colonyShips = p.colonyShips.filter((cs) => {
+                if (cs.ownerId !== beam.ownerId) {
+                  const dx = cs.x - beam.startX;
+                  const dy = cs.y - beam.startY;
+                  const along = dx * cosA + dy * sinA;
+                  const perp = Math.abs(-dx * sinA + dy * cosA);
+                  if (along > 0 && along < beam.length && perp < halfWidth + 12) {
+                    createExplosion(cs.x, cs.y, '#f59e0b', 35, true);
+                    return false;
+                  }
+                }
+                return true;
+              });
+
+              if (p.ownerId && p.ownerId !== beam.ownerId) {
+                p.buildings.forEach((bld) => {
+                  if (bld.hp > 0) {
+                    const bPos = getBuildingWorldPos(p.x, p.y, p.radius, bld.angleOnPlanet);
+                    const dx = bPos.x - beam.startX;
+                    const dy = bPos.y - beam.startY;
+                    const along = dx * cosA + dy * sinA;
+                    const perp = Math.abs(-dx * sinA + dy * cosA);
+                    if (along > 0 && along < beam.length && perp < halfWidth + 10) {
+                      bld.hp = 0;
+                      createExplosion(bPos.x, bPos.y, '#ef4444', 30, true);
+                      onUpdateStatsRef.current({ buildingsDestroyed: 1 });
+                    }
+                  }
+                });
+
+                if (p.spaceStation && p.spaceStation.ownerId !== beam.ownerId) {
+                  const stX = p.x + Math.cos(p.spaceStation.angle) * p.spaceStation.distance;
+                  const stY = p.y + Math.sin(p.spaceStation.angle) * p.spaceStation.distance;
+                  const dx = stX - beam.startX;
+                  const dy = stY - beam.startY;
+                  const along = dx * cosA + dy * sinA;
+                  const perp = Math.abs(-dx * sinA + dy * cosA);
+                  if (along > 0 && along < beam.length && perp < halfWidth + 15) {
+                    p.spaceStation = null;
+                    createExplosion(stX, stY, '#ef4444', 45, true);
+                  }
+                }
+              }
+            });
+          }
+        }
 
         // -------------------------------------------------------------
         // PLANET TAKEOVER / STAYING RESOLUTION:
@@ -2897,26 +3493,124 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         ctx.translate(ship.x, ship.y);
         ctx.rotate(ship.angle);
 
-        // Ship Hull - Exactly half size (was 16x20, now 8x10)
-        ctx.beginPath();
-        ctx.moveTo(8, 0);
-        ctx.lineTo(-6, -5);
-        ctx.lineTo(-3.5, 0);
-        ctx.lineTo(-6, 5);
-        ctx.closePath();
+        const shipClass = ship.shipClass || 'standard';
 
-        ctx.fillStyle = faction.shipColor;
-        ctx.fill();
-        ctx.strokeStyle = faction.accentColor;
-        ctx.lineWidth = 1.3;
-        ctx.stroke();
+        // 1. CUSTOM VECTOR HULLS BY SHIP CLASS
+        if (shipClass === 'interceptor') {
+          // INTERCEPTOR (Glass Cannon): Needle-nose, swept razor wings, dual wingtip blasters
+          ctx.beginPath();
+          ctx.moveTo(13, 0); // Razor sharp nose
+          ctx.lineTo(2, -2.5);
+          ctx.lineTo(-8, -8); // Port wingtip
+          ctx.lineTo(-6, -5);
+          ctx.lineTo(-4, -1.8);
+          ctx.lineTo(-8, 0); // Twin engine split indent
+          ctx.lineTo(-4, 1.8);
+          ctx.lineTo(-6, 5);
+          ctx.lineTo(-8, 8); // Starboard wingtip
+          ctx.lineTo(2, 2.5);
+          ctx.closePath();
 
-        ctx.fillStyle = '#ffffff';
-        ctx.beginPath();
-        ctx.arc(1, 0, 1.5, 0, Math.PI * 2);
-        ctx.fill();
+          ctx.fillStyle = faction.shipColor;
+          ctx.fill();
+          ctx.strokeStyle = faction.accentColor;
+          ctx.lineWidth = 1.4;
+          ctx.stroke();
 
-        // Engine flame if thrusting, boosting, or launching (half size)
+          // Wingtip blaster barrels
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(-8, -8.5, 3, 1.2);
+          ctx.fillRect(-8, 7.3, 3, 1.2);
+
+          // Cockpit canopy glint
+          ctx.fillStyle = '#ffffff';
+          ctx.beginPath();
+          ctx.arc(3, 0, 1.3, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (shipClass === 'commander') {
+          // COMMANDER (Fleet Carrier): Armored prow, dual hangar deck sponsons
+          ctx.beginPath();
+          ctx.moveTo(9, -4);
+          ctx.lineTo(11, 0);
+          ctx.lineTo(9, 4);
+          ctx.lineTo(1, 6.5); // Port hangar
+          ctx.lineTo(-8, 6.5);
+          ctx.lineTo(-7, 2);
+          ctx.lineTo(-9, 0); // Bridge indent
+          ctx.lineTo(-7, -2);
+          ctx.lineTo(-8, -6.5);
+          ctx.lineTo(1, -6.5); // Starboard hangar
+          ctx.closePath();
+
+          ctx.fillStyle = faction.shipColor;
+          ctx.fill();
+          ctx.strokeStyle = faction.accentColor;
+          ctx.lineWidth = 1.4;
+          ctx.stroke();
+
+          // Blue drone hangar launch strip lights
+          ctx.fillStyle = '#38bdf8';
+          ctx.fillRect(-5, -5.5, 5, 1.5);
+          ctx.fillRect(-5, 4, 5, 1.5);
+
+          // Command bridge dome
+          ctx.fillStyle = '#ffffff';
+          ctx.beginPath();
+          ctx.arc(0, 0, 1.8, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (shipClass === 'heavy_frigate') {
+          // HEAVY FRIGATE (Dreadnought): Broad armored dreadnought with prow emitter & flak flanks
+          ctx.beginPath();
+          ctx.moveTo(11, 0);
+          ctx.lineTo(8, -6);
+          ctx.lineTo(2, -9);
+          ctx.lineTo(-6, -9);
+          ctx.lineTo(-8, -5);
+          ctx.lineTo(-10, -2);
+          ctx.lineTo(-10, 2);
+          ctx.lineTo(-8, 5);
+          ctx.lineTo(-6, 9);
+          ctx.lineTo(2, 9);
+          ctx.lineTo(8, 6);
+          ctx.closePath();
+
+          ctx.fillStyle = faction.shipColor;
+          ctx.fill();
+          ctx.strokeStyle = faction.accentColor;
+          ctx.lineWidth = 1.6;
+          ctx.stroke();
+
+          // Prow Death-Beam emitter crystal
+          ctx.fillStyle = '#ef4444';
+          ctx.beginPath();
+          ctx.arc(7, 0, 2.2, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Heavy armor plating
+          ctx.fillStyle = '#1e293b';
+          ctx.fillRect(-3, -4, 6, 8);
+        } else {
+          // STANDARD FIGHTER (Terran Scout): Classic balanced delta strike craft
+          ctx.beginPath();
+          ctx.moveTo(9, 0);
+          ctx.lineTo(-6, -5.5);
+          ctx.lineTo(-3.5, 0);
+          ctx.lineTo(-6, 5.5);
+          ctx.closePath();
+
+          ctx.fillStyle = faction.shipColor;
+          ctx.fill();
+          ctx.strokeStyle = faction.accentColor;
+          ctx.lineWidth = 1.3;
+          ctx.stroke();
+
+          ctx.fillStyle = '#ffffff';
+          ctx.beginPath();
+          ctx.arc(1, 0, 1.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // Engine flame if thrusting, boosting, or launching
         if (ship.thrusting || ship.boosting || ship.flightState === 'launching') {
           if (ship.boosting) {
             // Hyper-thrust flame: twice as long, electric cyan/white
@@ -2956,14 +3650,15 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
         ctx.rotate(-ship.angle);
 
-        // 25 HP Energy Shield Bubble
+        // Rechargeable Energy Shield Bubble
         if (ship.shieldHp > 0) {
-          const shieldAlpha = Math.max(0.25, ship.shieldHp / 25);
+          const maxS = ship.maxShieldHp > 0 ? ship.maxShieldHp : 25;
+          const shieldAlpha = Math.max(0.25, ship.shieldHp / maxS);
           ctx.strokeStyle = `rgba(56, 189, 248, ${0.4 + 0.5 * shieldAlpha})`;
           ctx.fillStyle = `rgba(56, 189, 248, ${0.08 + 0.12 * shieldAlpha})`;
           ctx.lineWidth = 1.6;
           ctx.beginPath();
-          ctx.arc(0, 0, 14, 0, Math.PI * 2);
+          ctx.arc(0, 0, 15, 0, Math.PI * 2);
           ctx.fill();
           ctx.stroke();
 
@@ -2972,25 +3667,27 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           ctx.strokeStyle = `rgba(125, 211, 252, ${0.3 * (1 - pRing)})`;
           ctx.lineWidth = 1;
           ctx.beginPath();
-          ctx.arc(0, 0, 14 + pRing * 3.5, 0, Math.PI * 2);
+          ctx.arc(0, 0, 15 + pRing * 3.5, 0, Math.PI * 2);
           ctx.stroke();
         }
 
-        // 5 Health Pips - Scaled to fit half-size ship
+        // Dynamic Health Pips scaled to ship.maxHp
         const pipWidth = 3;
         const pipHeight = 2;
         const pipSpacing = 1.5;
-        const totalW = 5 * pipWidth + 4 * pipSpacing;
+        const maxPips = ship.maxHp;
+        const totalW = maxPips * pipWidth + (maxPips - 1) * pipSpacing;
         const startPx = -totalW / 2;
 
-        for (let i = 0; i < 5; i++) {
+        for (let i = 0; i < maxPips; i++) {
           ctx.fillStyle = i < ship.hp ? faction.color : 'rgba(255, 255, 255, 0.15)';
           ctx.fillRect(startPx + i * (pipWidth + pipSpacing), -13, pipWidth, pipHeight);
         }
 
-        // 25 HP Shield Bar (above health pips if active)
+        // Shield Bar (above health pips if active)
         if (ship.shieldHp > 0) {
-          const sRatio = Math.max(0, Math.min(1, ship.shieldHp / 25));
+          const maxS = ship.maxShieldHp > 0 ? ship.maxShieldHp : 25;
+          const sRatio = Math.max(0, Math.min(1, ship.shieldHp / maxS));
           ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
           ctx.fillRect(-10, -16.5, 20, 2);
           ctx.fillStyle = '#38bdf8';
@@ -3016,22 +3713,121 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
         const boostTag = ship.boosting ? ' [BOOST 2X]' : '';
         const buffIcons = (ship.shieldHp > 0 ? ' 🛡️' : '') + (ship.hasDoubleDamage ? ' ⚡2X' : '') + (ship.hasHomingRockets ? ' 🚀' : '');
+        const empTag = ship.empDisabledTimer && ship.empDisabledTimer > 0 ? ' ⚡[EMP OFFLINE]' : '';
         const statusTag = ship.flightState === 'landed' ? ' [LANDED]' : ship.flightState === 'launching' ? ' [LIFTOFF]' : ship.flightState === 'landing' ? ' [LANDING]' : boostTag;
         const tagY = ship.shieldHp > 0 ? -19 : -17;
-        ctx.fillText(faction.name + statusTag + buffIcons, 0, tagY);
+        ctx.fillText(faction.name + statusTag + empTag + buffIcons, 0, tagY);
 
         ctx.restore();
       });
 
       // -------------------------------------------------------------
-      // DRAW PROJECTILES / MISSILES
+      // DRAW ATTACK DRONES
+      // -------------------------------------------------------------
+      dronesRef.current.forEach((drone) => {
+        ctx.save();
+        ctx.translate(drone.x, drone.y);
+        ctx.rotate(drone.angle);
+
+        // Drone hull
+        ctx.beginPath();
+        ctx.moveTo(5, 0);
+        ctx.lineTo(-4, -3);
+        ctx.lineTo(-2, 0);
+        ctx.lineTo(-4, 3);
+        ctx.closePath();
+        ctx.fillStyle = '#10b981';
+        ctx.fill();
+        ctx.strokeStyle = '#34d399';
+        ctx.lineWidth = 0.9;
+        ctx.stroke();
+
+        // Glowing core
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(0, 0, 1, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
+      });
+
+      // -------------------------------------------------------------
+      // DRAW EMP SHOCKWAVES
+      // -------------------------------------------------------------
+      empWavesRef.current.forEach((wave) => {
+        ctx.save();
+        const alpha = Math.max(0, 1 - wave.elapsed / 1.6);
+        ctx.strokeStyle = `rgba(56, 189, 248, ${alpha})`;
+        ctx.lineWidth = 3.5;
+        ctx.shadowColor = '#38bdf8';
+        ctx.shadowBlur = 15;
+        ctx.beginPath();
+        ctx.arc(wave.x, wave.y, wave.radius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+        ctx.restore();
+      });
+
+      // -------------------------------------------------------------
+      // DRAW SECTOR DEATH BEAM
+      // -------------------------------------------------------------
+      if (deathBeamRef.current) {
+        const beam = deathBeamRef.current;
+        ctx.save();
+        ctx.translate(beam.startX, beam.startY);
+        ctx.rotate(beam.angle);
+
+        const pulse = 0.88 + Math.sin(Date.now() * 0.05) * 0.12;
+        const w = beam.width * pulse;
+
+        // Outer fiery plasma field
+        const beamGrad = ctx.createLinearGradient(0, -w / 2, 0, w / 2);
+        beamGrad.addColorStop(0, 'rgba(239, 68, 68, 0)');
+        beamGrad.addColorStop(0.3, 'rgba(239, 68, 68, 0.45)');
+        beamGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.95)');
+        beamGrad.addColorStop(0.7, 'rgba(239, 68, 68, 0.45)');
+        beamGrad.addColorStop(1, 'rgba(239, 68, 68, 0)');
+
+        ctx.fillStyle = beamGrad;
+        ctx.fillRect(0, -w / 2, beam.length, w);
+
+        // Blinding core laser beam
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, -w * 0.12, beam.length, w * 0.24);
+
+        // Prow emitter focal glow
+        ctx.beginPath();
+        ctx.arc(0, 0, w * 0.5, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.shadowColor = '#ef4444';
+        ctx.shadowBlur = 35;
+        ctx.fill();
+        ctx.shadowBlur = 0;
+
+        ctx.restore();
+      }
+
+      // -------------------------------------------------------------
+      // DRAW PROJECTILES / MISSILES / FLAK
       // -------------------------------------------------------------
       projectilesRef.current.forEach((proj) => {
         ctx.save();
         ctx.translate(proj.x, proj.y);
         ctx.rotate(proj.angle);
 
-        if (proj.isHomingRocket) {
+        if (proj.isFlak) {
+          // Heavy Tungsten Flak Shell with incendiary glow
+          ctx.beginPath();
+          ctx.roundRect(-5, -3, 10, 6, 2);
+          ctx.fillStyle = '#f97316';
+          ctx.shadowColor = '#f97316';
+          ctx.shadowBlur = 10;
+          ctx.fill();
+          ctx.shadowBlur = 0;
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        } else if (proj.isHomingRocket) {
           // Guided Homing Missile Sprite
           ctx.fillStyle = '#cbd5e1';
           ctx.fillRect(-5, -2, 10, 4);

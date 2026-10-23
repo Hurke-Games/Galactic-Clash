@@ -16,8 +16,11 @@ import {
   Pause,
   RotateCcw,
   Settings,
+  Radio,
 } from 'lucide-react';
+import { ShipClass } from '../types/game';
 import { formatKeyCode } from '../utils/controls';
+import { SHIP_CLASS_DEFS } from '../utils/shipProgression';
 
 interface HUDProps {
   playerHp: number;
@@ -30,6 +33,9 @@ interface HUDProps {
     hasDoubleDamage: boolean;
     hasHomingRockets: boolean;
   };
+  playerShipClass?: ShipClass;
+  specialCooldown?: number;
+  onTriggerSpecial?: () => void;
   factions: FactionConfig[];
   planets: Planet[];
   stats: GameStats;
@@ -48,6 +54,9 @@ export const HUD: React.FC<HUDProps> = ({
   playerBoost = 100,
   maxPlayerBoost = 100,
   playerBuffs = { shieldHp: 0, maxShieldHp: 0, hasDoubleDamage: false, hasHomingRockets: false },
+  playerShipClass = 'standard',
+  specialCooldown = 0,
+  onTriggerSpecial,
   factions,
   planets,
   stats,
@@ -73,12 +82,12 @@ export const HUD: React.FC<HUDProps> = ({
       {/* Top Header: 3-Zone Clean Top Bar Contract */}
       <header className="pointer-events-auto flex items-center justify-between px-5 py-3 rounded-xl bg-slate-950/85 backdrop-blur-md border border-slate-800/80 shadow-2xl">
         {/* Zone 1: Wordmark */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
           <span className="text-lg font-bold tracking-tight text-white font-['Outfit']">
             Galactic Clash
           </span>
-          <span className="hidden sm:inline text-xs text-slate-400">
-            Tactical Space Dominion
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-cyan-950/80 text-cyan-300 border border-cyan-500/30">
+            {SHIP_CLASS_DEFS[playerShipClass].codename.toUpperCase()}
           </span>
         </div>
 
@@ -199,6 +208,54 @@ export const HUD: React.FC<HUDProps> = ({
             </div>
           </div>
 
+          {/* Ship Class & Special Ability Gauge */}
+          {playerShipClass !== 'standard' && (
+            <>
+              <div className="hidden sm:block h-7 w-px bg-slate-800" />
+              <button
+                type="button"
+                onClick={onTriggerSpecial}
+                disabled={specialCooldown > 0}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border transition-all cursor-pointer ${
+                  specialCooldown <= 0
+                    ? playerShipClass === 'heavy_frigate'
+                      ? 'bg-purple-950/80 border-purple-400 text-purple-200 shadow-lg shadow-purple-500/25 animate-pulse hover:bg-purple-900'
+                      : playerShipClass === 'commander'
+                      ? 'bg-blue-950/80 border-blue-400 text-blue-200 shadow-lg shadow-blue-500/25 animate-pulse hover:bg-blue-900'
+                      : 'bg-cyan-950/80 border-cyan-400 text-cyan-200 shadow-lg shadow-cyan-500/25 animate-pulse hover:bg-cyan-900'
+                    : 'bg-slate-900/90 border-slate-800 text-slate-500 cursor-not-allowed'
+                }`}
+                title="Trigger Class Special Power (Key E, Q, or Right Click)"
+              >
+                {playerShipClass === 'heavy_frigate' ? (
+                  <Flame className="w-4 h-4 text-purple-400" />
+                ) : playerShipClass === 'commander' ? (
+                  <Radio className="w-4 h-4 text-blue-400" />
+                ) : (
+                  <Zap className="w-4 h-4 text-cyan-400" />
+                )}
+                <div className="text-left">
+                  <div className="text-[9px] uppercase tracking-wider font-mono font-bold">
+                    {playerShipClass === 'heavy_frigate'
+                      ? 'Death Beam'
+                      : playerShipClass === 'commander'
+                      ? '10 Drones'
+                      : 'EMP Blast'}
+                  </div>
+                  <div className="text-[11px] font-mono font-extrabold leading-none">
+                    {specialCooldown <= 0 ? (
+                      <span className="text-white flex items-center gap-1">
+                        READY <span className="text-[9px] opacity-75 font-normal">[E / R-Click]</span>
+                      </span>
+                    ) : (
+                      <span className="text-amber-400 font-bold">{Math.ceil(specialCooldown)}s</span>
+                    )}
+                  </div>
+                </div>
+              </button>
+            </>
+          )}
+
           {/* Active Buffs (Shield / 2x Damage / Homing Rockets) */}
           {(playerBuffs.shieldHp > 0 || playerBuffs.hasDoubleDamage || playerBuffs.hasHomingRockets) && (
             <>
@@ -263,6 +320,17 @@ export const HUD: React.FC<HUDProps> = ({
             </span>
             <span className="text-slate-400 ml-1">Fire</span>
           </div>
+          {playerShipClass !== 'standard' && (
+            <>
+              <span className="text-slate-600">·</span>
+              <div className="flex items-center gap-1 font-mono text-purple-300 font-semibold">
+                <span className="px-1.5 py-0.5 rounded bg-slate-900 border border-purple-500/50">
+                  E / R-Click
+                </span>
+                <span className="text-slate-400 ml-1">Special</span>
+              </div>
+            </>
+          )}
           <span className="text-slate-600">·</span>
           <div className="text-slate-400">
             Scroll: <span className="text-cyan-300 font-mono">Zoom</span>
