@@ -2828,12 +2828,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           if (beam.elapsed >= beam.duration) {
             deathBeamRef.current = null;
           } else {
-            const firingShip = shipsRef.current.find((s) => s.ownerId === beam.ownerId);
-            if (firingShip && !firingShip.isDead) {
-              beam.startX = firingShip.x;
-              beam.startY = firingShip.y;
-              beam.angle = firingShip.angle;
-            }
+            // Beam coordinates and angle remain fixed in space from the moment of firing
+            // The ship rotating or maneuvering will not sweep the beam corridor
 
             const cosA = Math.cos(beam.angle);
             const sinA = Math.sin(beam.angle);
@@ -3779,6 +3775,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
         const pulse = 0.88 + Math.sin(Date.now() * 0.05) * 0.12;
         const w = beam.width * pulse;
+        const fade = Math.min(1, Math.max(0, (beam.duration - beam.elapsed) / 0.35));
+        ctx.globalAlpha = fade;
 
         // Outer fiery plasma field
         const beamGrad = ctx.createLinearGradient(0, -w / 2, 0, w / 2);
